@@ -19,7 +19,7 @@ let addressescsv = [
 	'https://raw.githubusercontent.com/cmliu/WARP2sub/main/result.csv', //warp-yxip测速结果文件。
 ];
 
-let subconverter = "apiurl.v1.mk"; //在线订阅转换后端，目前使用肥羊的订阅转换功能。支持自建psub 可自行搭建https://github.com/bulianglin/psub
+let subconverter = "url.v1.mk"; //在线订阅转换后端，目前使用肥羊的订阅转换功能。支持自建psub 可自行搭建https://github.com/bulianglin/psub
 let subconfig = "https://raw.githubusercontent.com/cmliu/ACL4SSR/main/Clash/config/ACL4SSR_Online_MultiCountry_WARP.ini"; //订阅转换配置文件
 let BotToken ='';
 let ChatID =''; 
@@ -210,6 +210,7 @@ export default {
 		subconfig = env.SUBCONFIG || subconfig;
 		FileName = env.SUBNAME || FileName;
 		EndPS = env.PS || EndPS;
+		WarpKeyURL = env.KEYURL || WarpKeyURL
 		const userAgentHeader = request.headers.get('User-Agent');
 		const userAgent = userAgentHeader ? userAgentHeader.toLowerCase() : "null";
 		const url = new URL(request.url);
@@ -223,7 +224,7 @@ export default {
 		total = total * 1099511627776 * 1024;
 		let expire= Math.floor(timestamp / 1000) ;
 		if (mytoken.length > 0 && mytoken.some(token => url.pathname.includes(token))) {
-			if (!userAgent.includes('subconverter')) await sendMessage("#获取订阅", request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
+			if (!userAgent.includes('subconverter')) await sendMessage("#WARP订阅", request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 			if (WarpKeys.length == 0 && WarpKeyURL){
 				try {
 					const response = await fetch(WarpKeyURL); 
@@ -261,6 +262,12 @@ export default {
 			`);
 */
 		} else if (!url.pathname.includes("/sub")){
+			const envKey = env.URL302 ? 'URL302' : (env.URL ? 'URL' : null);
+			if (envKey) {
+				const URLs = await ADD(env[envKey]);
+				const URL = URLs[Math.floor(Math.random() * URLs.length)];
+				return envKey === 'URL302' ? Response.redirect(URL, 302) : fetch(new Request(URL, request));
+			}
 			//首页改成一个nginx伪装页
 			return new Response(await nginx(), {
 				headers: {
@@ -280,31 +287,50 @@ export default {
 		if (url.searchParams.has('ip')){
 			addresses = [url.searchParams.get('ip')];
 			//console.log(addresses);
+		} else if (url.searchParams.has('api')){
+			addressesapi = [url.searchParams.get('api')];
+			addresses = await getADDAPI(addressesapi);
+		} else if (url.searchParams.has('csv')){
+			addressescsv = [url.searchParams.get('csv')];
+			addresses = await getADDCSV();
 		} else {
 			const newAddressesapi = await getADDAPI(addressesapi);
 			const newAddressescsv = await getADDCSV();
 			addresses = addresses.concat(newAddressesapi);
 			addresses = addresses.concat(newAddressescsv);
 		}
-
+		console.log(addresses);
 		// 使用Set对象去重
 		const uniqueAddresses = [...new Set(addresses)];
 		//console.log(uniqueAddresses);
-
-		if (url.searchParams.has('warp')) {
-			const 输出结果 = await wgLink(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
-			return new Response(`${输出结果}`);
-		}
 		
 		let 汇总 = await v2rayN(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
 		汇总 += '\n' + await 小火箭(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
 		let 输出结果 = btoa(汇总);
 
+		if (userAgent.includes(('CF-Workers-SUB').toLowerCase())){
+			if (userAgent.includes('clash') || userAgent.includes('singbox') || userAgent.includes('sing-box')){
+				汇总 = await clash(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
+				输出结果 = 汇总;
+				return new Response(`${输出结果}`, {
+					headers: { 
+						//"Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(FileName)}; filename=${FileName}`,
+						"content-type": "text/plain; charset=utf-8",
+						"Profile-Update-Interval": `${SUBUpdateTime}`,
+						"Subscription-Userinfo": `upload=${UD}; download=${UD}; total=${total}; expire=${expire}`,
+					},
+				});
+			}
+		} else if (url.searchParams.has('warp2clash')){
+			const 输出结果 = await wgLink(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
+			return new Response(`${输出结果}`);
+		}
+
 		if (userAgent.includes('subconverter')){
 			汇总 = await clash(uniqueAddresses,PrivateKey,PublicKey,MTU,ipv4,ipv6);
 			输出结果 = 汇总;
-		} else if (userAgent.includes('clash')){
-			const 输出结果 = await SUBAPI('clash',request);
+		} else if (userAgent.includes('clash') || url.searchParams.has('clash')){
+			const 输出结果 = await clashFix(await SUBAPI('clash',request)) ;
 			return new Response(`${输出结果}`, {
 				headers: { 
 					"Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(FileName)}; filename=${FileName}`,
@@ -313,7 +339,7 @@ export default {
 					"Subscription-Userinfo": `upload=${UD}; download=${UD}; total=${total}; expire=${expire}`,
 				},
 			});
-		} else if (userAgent.includes('singbox') || userAgent.includes('sing-box') || userAgentHeader == 'v2rayng'){
+		} else if (userAgent.includes('singbox') || userAgent.includes('sing-box') || userAgentHeader == 'v2rayng' || url.searchParams.has('singbox') || url.searchParams.has('sb')){
 			const 输出结果 = await SUBAPI('singbox',request);
 			return new Response(`${输出结果}`, {
 				headers: { 
@@ -350,7 +376,7 @@ async function v2rayN(优选IP数组,私钥,公钥,MTU,ipv4,ipv6) {
 		let port = "987";
 		let id = 'WARP';
 	
-		const match = id.match(regex);
+		const match = ip.match(regex);
 		if (!match) {
 			if (ip.includes(':') && ip.includes('#')) {
 				const parts = ip.split(':');
@@ -399,7 +425,7 @@ async function 小火箭(优选IP数组,私钥,公钥,MTU,ipv4,ipv6) {
 		let port = "987";
 		let id = 'WARP';
 	
-		const match = id.match(regex);
+		const match = ip.match(regex);
 		if (!match) {
 			if (ip.includes(':') && ip.includes('#')) {
 				const parts = ip.split(':');
@@ -447,7 +473,7 @@ async function clash(优选IP数组,私钥,公钥,MTU,ipv4,ipv6) {
 		let port = "987";
 		let id = 'WARP';
 	
-		const match = id.match(regex);
+		const match = ip.match(regex);
 		if (!match) {
 			if (ip.includes(':') && ip.includes('#')) {
 				const parts = ip.split(':');
@@ -503,101 +529,6 @@ rules:`;
 	return yaml;
 }
 
-async function wgLink(优选IP数组,私钥,公钥,MTU,ipv4,ipv6) {
-	let WARP前置ID = "🌐 WARP前置线路";
-	let 起始数值 = 0;
-	const responseBody = 优选IP数组.map(ip => {
-		const WarpKey = WarpKeys[Math.floor(Math.random() * WarpKeys.length)];
-		//console.log(WarpKey);
-		私钥 = WarpKey.split(',')[0] || 私钥;
-		ipv4 = WarpKey.split(',')[3] || ipv4;
-		ipv6 = WarpKey.split(',')[4] || ipv6;
-		MTU = WarpKey.split(',')[2] || MTU;
-		公钥 = WarpKey.split(',')[1] || 公钥;
-		let port = "987";
-		let id = 'WARP';
-	
-		const match = id.match(regex);
-		if (!match) {
-			if (ip.includes(':') && ip.includes('#')) {
-				const parts = ip.split(':');
-				ip = parts[0];
-				const subParts = parts[1].split('#');
-				port = subParts[0];
-				id = subParts[1];
-			} else if (ip.includes(':')) {
-				const parts = ip.split(':');
-				ip = parts[0];
-				port = parts[1];
-			} else if (ip.includes('#')) {
-				const parts = ip.split('#');
-				ip = parts[0];
-				id = parts[1];
-			}
-		
-			if (id.includes(':')) {
-				id = id.split(':')[0];
-			}
-		} else {
-			ip = match[1];
-			port = match[2] || port;
-			id = match[3] || id;
-		}
-		起始数值 += 1;
-		const 节点ID = `${id} ${起始数值}${EndPS}`;
-		const wireguardLink = `  - {name: ${节点ID} , server: ${ip}, port: ${port}, reality-opts: {public-key: ${公钥}}, client-fingerprint: chrome, type: wireguard, public-key: ${公钥}, private-key: ${私钥}, ip: ${ipv4.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/)[0]}, dns: [1.1.1.1],remote-dns-resolve: true, mtu: 1280, udp: true, dialer-proxy: "${WARP前置ID}"}`;
-		
-		return wireguardLink;
-	}).join('\n');
-
-	起始数值 = 0;
-	const proxies = 优选IP数组.map(ip => {
-		const WarpKey = WarpKeys[Math.floor(Math.random() * WarpKeys.length)];
-		//console.log(WarpKey);
-		私钥 = WarpKey.split(',')[0] || 私钥;
-		ipv4 = WarpKey.split(',')[3] || ipv4;
-		ipv6 = WarpKey.split(',')[4] || ipv6;
-		MTU = WarpKey.split(',')[2] || MTU;
-		公钥 = WarpKey.split(',')[1] || 公钥;
-		let port = "987";
-		let id = 'WARP';
-	
-		const match = id.match(regex);
-		if (!match) {
-			if (ip.includes(':') && ip.includes('#')) {
-				const parts = ip.split(':');
-				ip = parts[0];
-				const subParts = parts[1].split('#');
-				port = subParts[0];
-				id = subParts[1];
-			} else if (ip.includes(':')) {
-				const parts = ip.split(':');
-				ip = parts[0];
-				port = parts[1];
-			} else if (ip.includes('#')) {
-				const parts = ip.split('#');
-				ip = parts[0];
-				id = parts[1];
-			}
-		
-			if (id.includes(':')) {
-				id = id.split(':')[0];
-			}
-		} else {
-			ip = match[1];
-			port = match[2] || port;
-			id = match[3] || id;
-		}
-		起始数值 += 1;
-		const 节点ID = `${id} ${起始数值}${EndPS}`;
-		const wireguardLink = `      - ${节点ID}`;
-		
-		return wireguardLink;
-	}).join('\n');
-
-	return `${WARP前置ID}\n\ncmliu/WARP2sub\n\n${proxies}\n\ncmliu/WARP2sub\n\n${responseBody}`;
-}
-
 async function SUBAPI(target,request) {
 	const subconverterUrl = `https://${subconverter}/sub?target=${target}&url=${encodeURIComponent(request.url)}&insert=false&config=${encodeURIComponent(subconfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
 	let subconverterContent = "";
@@ -618,4 +549,124 @@ async function SUBAPI(target,request) {
 	}
 
 	return subconverterContent;
+}
+
+async function wgLink(优选IP数组,私钥,公钥,MTU,ipv4,ipv6) {
+	let WARP前置ID = "🌐 WARP前置代理";
+	let 起始数值 = 0;
+	const responseBody = 优选IP数组.map(ip => {
+		const WarpKey = WarpKeys[Math.floor(Math.random() * WarpKeys.length)];
+		//console.log(WarpKey);
+		私钥 = WarpKey.split(',')[0] || 私钥;
+		ipv4 = WarpKey.split(',')[3] || ipv4;
+		ipv6 = WarpKey.split(',')[4] || ipv6;
+		MTU = WarpKey.split(',')[2] || MTU;
+		公钥 = WarpKey.split(',')[1] || 公钥;
+		let port = "987";
+		let id = 'WARP';
+
+		const match = ip.match(regex);
+		if (!match) {
+			if (ip.includes(':') && ip.includes('#')) {
+				const parts = ip.split(':');
+				ip = parts[0];
+				const subParts = parts[1].split('#');
+				port = subParts[0];
+				id = subParts[1];
+			} else if (ip.includes(':')) {
+				const parts = ip.split(':');
+				ip = parts[0];
+				port = parts[1];
+			} else if (ip.includes('#')) {
+				const parts = ip.split('#');
+				ip = parts[0];
+				id = parts[1];
+			}
+
+			if (id.includes(':')) {
+				id = id.split(':')[0];
+			}
+		} else {
+			ip = match[1];
+			port = match[2] || port;
+			id = match[3] || id;
+		}
+		起始数值 += 1;
+		const 节点ID = `${id} ${起始数值}${EndPS}`;
+		const wireguardLink = `  - {name: ${节点ID} , server: ${ip}, port: ${port}, reality-opts: {public-key: ${公钥}}, client-fingerprint: chrome, type: wireguard, public-key: ${公钥}, private-key: ${私钥}, ip: ${ipv4.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/)[0]}, dns: [1.1.1.1],remote-dns-resolve: true, mtu: 1280, udp: true, dialer-proxy: "${WARP前置ID}"}`;
+
+		return wireguardLink;
+	}).join('\n');
+
+	起始数值 = 0;
+	const proxies = 优选IP数组.map(ip => {
+		const WarpKey = WarpKeys[Math.floor(Math.random() * WarpKeys.length)];
+		//console.log(WarpKey);
+		私钥 = WarpKey.split(',')[0] || 私钥;
+		ipv4 = WarpKey.split(',')[3] || ipv4;
+		ipv6 = WarpKey.split(',')[4] || ipv6;
+		MTU = WarpKey.split(',')[2] || MTU;
+		公钥 = WarpKey.split(',')[1] || 公钥;
+		let port = "987";
+		let id = 'WARP';
+
+		const match = ip.match(regex);
+		if (!match) {
+			if (ip.includes(':') && ip.includes('#')) {
+				const parts = ip.split(':');
+				ip = parts[0];
+				const subParts = parts[1].split('#');
+				port = subParts[0];
+				id = subParts[1];
+			} else if (ip.includes(':')) {
+				const parts = ip.split(':');
+				ip = parts[0];
+				port = parts[1];
+			} else if (ip.includes('#')) {
+				const parts = ip.split('#');
+				ip = parts[0];
+				id = parts[1];
+			}
+
+			if (id.includes(':')) {
+				id = id.split(':')[0];
+			}
+		} else {
+			ip = match[1];
+			port = match[2] || port;
+			id = match[3] || id;
+		}
+		起始数值 += 1;
+		const 节点ID = `${id} ${起始数值}${EndPS}`;
+		const wireguardLink = `      - ${节点ID}`;
+
+		return wireguardLink;
+	}).join('\n');
+
+	return `${WARP前置ID}\n\ncmliu/WARP2sub\n\n${proxies}\n\ncmliu/WARP2sub\n\n${responseBody}`;
+}
+
+function clashFix(content) {
+	if(!content.includes('remote-dns-resolve')){
+		let lines;
+		if (content.includes('\r\n')){
+			lines = content.split('\r\n');
+		} else {
+			lines = content.split('\n');
+		}
+	
+		let result = "";
+		for (let line of lines) {
+			if (line.includes('type: wireguard')) {
+				const 备改内容 = `, mtu: 1280, udp: true`;
+				const 正确内容 = `, mtu: 1280, remote-dns-resolve: true, udp: true`;
+				result += line.replace(new RegExp(备改内容, 'g'), 正确内容) + '\n';
+			} else {
+				result += line + '\n';
+			}
+		}
+
+		content = result;
+	}
+	return content;
 }
